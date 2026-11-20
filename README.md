@@ -5,6 +5,7 @@
 Built for the **AWS ShipIt Challenge** by **Techfest 2026-27, IIT Bombay** in collaboration with **AWS**, on the **AWS Free Tier**.
 
 **Live demo:** https://d1zfmw732536j6.cloudfront.net
+
 **Demo video:** [Watch the 60-90 second demo] https://canva.link/32pdx28kugwn2ml
 
 > Menu items are stored per day. If the menu looks empty when you visit, just add a few of today's dishes with the form on the page, or tap a crowd button to see the status update.
