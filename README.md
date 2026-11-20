@@ -28,6 +28,8 @@ My campus, CHRIST (Deemed to be University) Kengeri Campus, is on the outskirts 
 
 That means students often walk to the cafeteria without knowing whether it's packed or what's being served, which wastes time between classes. There is also no single place to see today's menu or what other students think of it.
 
+**Why I chose it:** I'm a student on this campus, and the cafeteria is part of every day here. Guessing whether it's packed, or what's being served, is a small daily annoyance, and I wanted to fix it with something real instead of just putting up with it.
+
 ## The solution
 
 Canteen Live is a small web app that works in any phone browser, with no login or install.
