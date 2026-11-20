@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Canteen Live - cafeteria menu, crowd status and ratings for Christ Kengeri (serverless, free-tier friendly)
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 128
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - content-type
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: .
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Table
+      Events:
+        Status:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /status, Method: GET }
+        Crowd:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /crowd, Method: POST }
+        Menu:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /menu, Method: POST }
+        Rate:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /rate, Method: POST }
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          # AWS managed "CachingDisabled" policy, so edits show up immediately
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+Outputs:
+  ApiUrl:
+    Description: Put this in config.js
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"
+  SiteUrl:
+    Description: Your live website
+    Value: !Sub "https://${Distribution.DomainName}"
+  BucketName:
+    Description: Upload index.html and config.js here
+    Value: !Ref SiteBucket

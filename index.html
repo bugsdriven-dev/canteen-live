@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canteen Live</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1c2430; --muted: #6b7684; --line: #e3e7ec;
+    --brand: #1f4fd8; --empty: #2e9e5b; --moderate: #d9a400; --busy: #e8731a; --packed: #d62f3f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12161c; --card: #1b212a; --text: #e9edf2; --muted: #93a0b0; --line: #2a323d; --brand: #6b93ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 8px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: .9rem; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 1rem; margin: 0 0 10px; }
+  .status { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--line); flex: none; }
+  .status strong { font-size: 1.25rem; text-transform: capitalize; }
+  .status small { color: var(--muted); display: block; }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+           border-radius: 10px; padding: 10px 4px; cursor: pointer; }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .meal { margin-top: 14px; }
+  .meal h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+  .item { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+          padding: 8px 0; border-top: 1px solid var(--line); }
+  .item:first-of-type { border-top: 0; }
+  .item .avg { color: var(--muted); font-size: .8rem; }
+  .stars button { border: 0; background: none; padding: 2px; font-size: 1.25rem; color: var(--line); }
+  .stars button.on { color: #f0a800; }
+  form { display: grid; gap: 8px; }
+  input, select { font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+                  background: var(--bg); color: var(--text); width: 100%; }
+  .row { display: grid; grid-template-columns: 1fr 120px; gap: 8px; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #222; color: #fff;
+           padding: 10px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  .empty-note { color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Canteen Live</h1>
+  <p class="sub">Christ Kengeri cafeteria &middot; student-reported, updated every 30 seconds</p>
+
+  <section>
+    <h2>How crowded is it right now?</h2>
+    <div class="status">
+      <div class="dot" id="dot"></div>
+      <div><strong id="level">No reports yet</strong><small id="meta">Be the first to report</small></div>
+    </div>
+    <div class="btns" id="crowdBtns">
+      <button data-level="empty">Empty</button>
+      <button data-level="moderate">Okay</button>
+      <button data-level="busy">Busy</button>
+      <button data-level="packed">Packed</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Today's menu</h2>
+    <div id="menu"><p class="empty-note">Loading&hellip;</p></div>
+  </section>
+
+  <section>
+    <h2>Add a menu item</h2>
+    <form id="addForm">
+      <div class="row">
+        <input id="itemName" maxlength="60" placeholder="e.g. Veg biryani" required>
+        <select id="itemMeal">
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch" selected>Lunch</option>
+          <option value="snacks">Snacks</option>
+          <option value="dinner">Dinner</option>
+        </select>
+      </div>
+      <button class="primary" type="submit">Add to today's menu</button>
+    </form>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script src="config.js"></script>
+<script>
+const API = (window.API_URL || "").replace(/\/$/, "");
+const COLORS = { empty: "--empty", moderate: "--moderate", busy: "--busy", packed: "--packed" };
+const LABELS = { empty: "Empty", moderate: "Okay", busy: "Busy", packed: "Packed" };
+const MEALS = ["breakfast", "lunch", "snacks", "dinner"];
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// remember what this browser already rated (light convenience only)
+function getRated() { try { return JSON.parse(localStorage.getItem("rated:" + new Date().toDateString()) || "{}"); } catch { return {}; } }
+function setRated(o) { try { localStorage.setItem("rated:" + new Date().toDateString(), JSON.stringify(o)); } catch {} }
+
+async function api(path, options) {
+  if (!API) throw new Error("API_URL not set in config.js");
+  const res = await fetch(API + path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+function renderCrowd(c) {
+  const dot = $("dot");
+  if (!c.level) {
+    dot.style.background = "var(--line)";
+    $("level").textContent = "No reports yet";
+    $("meta").textContent = "Be the first to report";
+    return;
+  }
+  dot.style.background = `var(${COLORS[c.level]})`;
+  $("level").textContent = LABELS[c.level];
+  const ago = c.minutesAgo === 0 ? "just now" : `${c.minutesAgo} min ago`;
+  $("meta").textContent = `${c.reports} report${c.reports > 1 ? "s" : ""} in the last 30 min, latest ${ago}`;
+}
+
+function renderMenu(menu) {
+  const box = $("menu");
+  box.replaceChildren();
+  if (!menu.length) {
+    const p = document.createElement("p");
+    p.className = "empty-note";
+    p.textContent = "Nothing posted yet. Add today's items below.";
+    box.append(p);
+    return;
+  }
+  const rated = getRated();
+  for (const meal of MEALS) {
+    const items = menu.filter((m) => m.meal === meal);
+    if (!items.length) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "meal";
+    const h = document.createElement("h3");
+    h.textContent = meal;
+    wrap.append(h);
+    for (const it of items) {
+      const row = document.createElement("div");
+      row.className = "item";
+      const left = document.createElement("div");
+      const name = document.createElement("div");
+      name.textContent = it.name;
+      const avg = document.createElement("div");
+      avg.className = "avg";
+      avg.textContent = it.rating ? `${it.rating} / 5 (${it.ratingCount})` : "No ratings yet";
+      left.append(name, avg);
+      const stars = document.createElement("div");
+      stars.className = "stars";
+      for (let s = 1; s <= 5; s++) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = "\u2605";
+        b.setAttribute("aria-label", `${s} star${s > 1 ? "s" : ""}`);
+        if (rated[it.id] >= s) b.classList.add("on");
+        b.addEventListener("click", () => rate(it.id, s));
+        stars.append(b);
+      }
+      row.append(left, stars);
+      wrap.append(row);
+    }
+    box.append(wrap);
+  }
+}
+
+async function refresh() {
+  try {
+    const data = await api("/status");
+    renderCrowd(data.crowd);
+    renderMenu(data.menu);
+  } catch (e) {
+    $("menu").textContent = e.message;
+  }
+}
+
+async function rate(id, stars) {
+  const rated = getRated();
+  if (rated[id]) return toast("You already rated this today");
+  try {
+    await post("/rate", { itemId: id, stars });
+    rated[id] = stars;
+    setRated(rated);
+    toast("Thanks for rating!");
+    refresh();
+  } catch (e) { toast(e.message); }
+}
+
+$("crowdBtns").addEventListener("click", async (e) => {
+  const level = e.target.dataset && e.target.dataset.level;
+  if (!level) return;
+  try { await post("/crowd", { level }); toast("Report sent"); refresh(); }
+  catch (err) { toast(err.message); }
+});
+
+$("addForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await post("/menu", { name: $("itemName").value, meal: $("itemMeal").value });
+    $("itemName").value = "";
+    toast("Added");
+    refresh();
+  } catch (err) { toast(err.message); }
+});
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
